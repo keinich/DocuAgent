@@ -29,6 +29,7 @@ class HTMLGenerator:
         title: str = "API Documentation",
         include_source: bool = True,
         custom_css: str | None = None,
+        editable: bool = False,
     ):
         """Initialize the HTML generator.
 
@@ -37,11 +38,13 @@ class HTMLGenerator:
             title: Documentation title.
             include_source: Whether to include source code in output.
             custom_css: Optional custom CSS to include.
+            editable: Whether to generate editable documentation with checkboxes.
         """
         self.output_dir = Path(output_dir)
         self.title = title
         self.include_source = include_source
         self.custom_css = custom_css
+        self.editable = editable
 
         # Set up Jinja2 environment with built-in templates
         self.env = Environment(
@@ -136,6 +139,7 @@ class HTMLGenerator:
             toc_entries=toc_entries,
             selections=selections,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            editable=self.editable,
         )
 
         (self.output_dir / "index.html").write_text(html_content)
@@ -188,6 +192,7 @@ class HTMLGenerator:
             included_ids=included_ids,
             include_source=self.include_source,
             get_display_info=get_display_info,
+            editable=self.editable,
         )
 
         # Create module filename from path
@@ -303,7 +308,7 @@ class HTMLGenerator:
     <title>{{ title }}</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body{% if editable %} class="editable-mode"{% endif %}>
     <nav class="sidebar">
         <div class="sidebar-header">
             <h1>{{ title }}</h1>
@@ -311,25 +316,64 @@ class HTMLGenerator:
                 <input type="text" id="search-input" placeholder="Search...">
             </div>
         </div>
+        {% if editable %}
+        <div class="edit-controls">
+            <h3>Selection Controls</h3>
+            <div class="edit-buttons">
+                <button id="select-all-btn" class="edit-btn">Select All</button>
+                <button id="deselect-all-btn" class="edit-btn">Deselect All</button>
+            </div>
+            <div class="edit-buttons">
+                <button id="export-selections-btn" class="edit-btn primary">Export Selections</button>
+            </div>
+            <p class="edit-hint">Check/uncheck components to include in documentation, then export selections.</p>
+        </div>
+        {% endif %}
         <div class="toc">
             <h2>Table of Contents</h2>
             <ul class="toc-list">
             {% for entry in toc_entries %}
-                {% if not selections or entry.id not in selections or selections[entry.id].included %}
-                <li class="toc-item toc-level-{{ entry.level }}">
+                {% set entry_included = not selections or entry.id not in selections or selections[entry.id].included %}
+                {% if editable or entry_included %}
+                <li class="toc-item toc-level-{{ entry.level }}{% if not entry_included %} excluded{% endif %}">
                     {% set module_filename = entry.file_path.replace("/", "_").replace("\\\\", "_") %}
                     {% if module_filename.endswith(".py") %}
                         {% set module_filename = module_filename[:-3] %}
                     {% endif %}
+                    {% if editable %}
+                    <label class="toc-checkbox-label">
+                        <input type="checkbox" class="component-checkbox"
+                               data-id="{{ entry.id }}"
+                               data-type="{{ entry.component_type.value }}"
+                               data-title="{{ entry.title }}"
+                               {% if entry_included %}checked{% endif %}>
+                        <a href="modules/{{ module_filename }}.html">{{ entry.title }}</a>
+                    </label>
+                    {% else %}
                     <a href="modules/{{ module_filename }}.html">{{ entry.title }}</a>
+                    {% endif %}
                     {% if entry.children %}
                     <ul class="toc-children">
                         {% for child in entry.children %}
-                            {% if not selections or child.id not in selections or selections[child.id].included %}
-                            <li class="toc-item toc-level-{{ child.level }}">
+                            {% set child_included = not selections or child.id not in selections or selections[child.id].included %}
+                            {% if editable or child_included %}
+                            <li class="toc-item toc-level-{{ child.level }}{% if not child_included %} excluded{% endif %}">
+                                {% if editable %}
+                                <label class="toc-checkbox-label">
+                                    <input type="checkbox" class="component-checkbox"
+                                           data-id="{{ child.id }}"
+                                           data-type="{{ child.component_type.value }}"
+                                           data-title="{{ child.title }}"
+                                           {% if child_included %}checked{% endif %}>
+                                    <a href="modules/{{ module_filename }}.html#{{ child.component_type.value }}-{{ child.title.split('(')[0] }}">
+                                        {{ child.title }}
+                                    </a>
+                                </label>
+                                {% else %}
                                 <a href="modules/{{ module_filename }}.html#{{ child.component_type.value }}-{{ child.title.split('(')[0] }}">
                                     {{ child.title }}
                                 </a>
+                                {% endif %}
                             </li>
                             {% endif %}
                         {% endfor %}
@@ -345,10 +389,19 @@ class HTMLGenerator:
         <header>
             <h1>{{ title }}</h1>
             <p class="generated-at">Generated on {{ generated_at }}</p>
+            {% if editable %}
+            <p class="edit-mode-badge">Editable Mode</p>
+            {% endif %}
         </header>
         <section class="overview">
             <h2>Overview</h2>
+            {% if editable %}
+            <p>This documentation is in <strong>editable mode</strong>. Use the checkboxes in the sidebar and on each component to select which items to include in the final documentation.</p>
+            <p>When you're done, click <strong>Export Selections</strong> to download a <code>selections.yaml</code> file. Then regenerate documentation using:</p>
+            <pre><code>docuagent generate --use-selections</code></pre>
+            {% else %}
             <p>Welcome to the API documentation. Use the table of contents on the left to navigate through the modules, classes, and functions.</p>
+            {% endif %}
 
             <h3>Quick Stats</h3>
             <ul>
@@ -375,22 +428,58 @@ class HTMLGenerator:
     <title>{{ module.name }} - {{ title }}</title>
     <link rel="stylesheet" href="../style.css">
 </head>
-<body>
+<body{% if editable %} class="editable-mode"{% endif %}>
     <nav class="sidebar">
         <div class="sidebar-header">
             <a href="../index.html" class="back-link">&larr; Back to Index</a>
             <h2>{{ module.name }}</h2>
         </div>
+        {% if editable %}
+        <div class="edit-controls">
+            <h3>Selection Controls</h3>
+            <div class="edit-buttons">
+                <button id="select-all-btn" class="edit-btn">Select All</button>
+                <button id="deselect-all-btn" class="edit-btn">Deselect All</button>
+            </div>
+            <div class="edit-buttons">
+                <button id="export-selections-btn" class="edit-btn primary">Export Selections</button>
+            </div>
+        </div>
+        {% endif %}
         <div class="module-toc">
             <h3>Contents</h3>
             <ul>
                 {% for cls in classes %}
                 <li>
+                    {% if editable %}
+                    <label class="toc-checkbox-label">
+                        <input type="checkbox" class="component-checkbox"
+                               data-id="{{ cls.id }}"
+                               data-type="class"
+                               data-title="{{ cls.name }}"
+                               {% if cls.id in included_ids or not selections %}checked{% endif %}>
+                        <a href="#class-{{ cls.name }}">{{ cls.name }}</a>
+                    </label>
+                    {% else %}
                     <a href="#class-{{ cls.name }}">{{ cls.name }}</a>
+                    {% endif %}
                     <ul>
                         {% for method in cls.methods %}
-                            {% if method.id in included_ids or not selections %}
-                            <li><a href="#method-{{ cls.name }}-{{ method.name }}">{{ method.name }}()</a></li>
+                            {% if editable or method.id in included_ids or not selections %}
+                            <li>
+                                {% if editable %}
+                                <label class="toc-checkbox-label">
+                                    <input type="checkbox" class="component-checkbox"
+                                           data-id="{{ method.id }}"
+                                           data-type="method"
+                                           data-title="{{ cls.name }}.{{ method.name }}"
+                                           {% if method.id in included_ids or not selections %}checked{% endif %}>
+                                    <a href="#method-{{ cls.name }}-{{ method.name }}">{{ method.name }}()</a>
+                                </label>
+                                {% else %}
+                                <a href="#method-{{ cls.name }}-{{ method.name }}">{{ method.name }}()</a>
+                                {% endif %}
+                            </li>
                             {% endif %}
                         {% endfor %}
                     </ul>
@@ -399,7 +488,20 @@ class HTMLGenerator:
                 {% if functions %}
                 <li class="functions-header">Functions</li>
                 {% for func in functions %}
-                <li><a href="#function-{{ func.name }}">{{ func.name }}()</a></li>
+                <li>
+                    {% if editable %}
+                    <label class="toc-checkbox-label">
+                        <input type="checkbox" class="component-checkbox"
+                               data-id="{{ func.id }}"
+                               data-type="function"
+                               data-title="{{ func.name }}"
+                               {% if func.id in included_ids or not selections %}checked{% endif %}>
+                        <a href="#function-{{ func.name }}">{{ func.name }}()</a>
+                    </label>
+                    {% else %}
+                    <a href="#function-{{ func.name }}">{{ func.name }}()</a>
+                    {% endif %}
+                </li>
                 {% endfor %}
                 {% endif %}
             </ul>
@@ -407,7 +509,20 @@ class HTMLGenerator:
     </nav>
     <main class="content">
         <header class="module-header">
-            <h1>{{ module_title }}</h1>
+            <h1>
+                {% if editable %}
+                <label class="header-checkbox-label">
+                    <input type="checkbox" class="component-checkbox"
+                           data-id="{{ module.id }}"
+                           data-type="module"
+                           data-title="{{ module.name }}"
+                           {% if module.id in included_ids or not selections %}checked{% endif %}>
+                    {{ module_title }}
+                </label>
+                {% else %}
+                {{ module_title }}
+                {% endif %}
+            </h1>
             <p class="file-path">{{ module.file_path }}</p>
         </header>
 
@@ -425,6 +540,15 @@ class HTMLGenerator:
         {% for cls in classes %}
         <section class="class-section" id="class-{{ cls.name }}">
             <h2 class="class-title">
+                {% if editable %}
+                <label class="component-checkbox-label">
+                    <input type="checkbox" class="component-checkbox"
+                           data-id="{{ cls.id }}"
+                           data-type="class"
+                           data-title="{{ cls.name }}"
+                           {% if cls.id in included_ids or not selections %}checked{% endif %}>
+                </label>
+                {% endif %}
                 <span class="keyword">class</span> {{ cls.name }}
                 {% if cls.base_classes %}
                 <span class="bases">({{ cls.base_classes | join(", ") }})</span>
@@ -465,9 +589,18 @@ class HTMLGenerator:
             <div class="methods">
                 <h3>Methods</h3>
                 {% for method in cls.methods %}
-                    {% if method.id in included_ids or not selections %}
-                    <div class="method" id="method-{{ cls.name }}-{{ method.name }}">
+                    {% if editable or method.id in included_ids or not selections %}
+                    <div class="method{% if editable and method.id not in included_ids and selections %} excluded{% endif %}" id="method-{{ cls.name }}-{{ method.name }}">
                         <h4 class="method-signature">
+                            {% if editable %}
+                            <label class="component-checkbox-label">
+                                <input type="checkbox" class="component-checkbox"
+                                       data-id="{{ method.id }}"
+                                       data-type="method"
+                                       data-title="{{ cls.name }}.{{ method.name }}"
+                                       {% if method.id in included_ids or not selections %}checked{% endif %}>
+                            </label>
+                            {% endif %}
                             {% if method.is_static %}<span class="decorator">@staticmethod</span><br>{% endif %}
                             {% if method.is_classmethod %}<span class="decorator">@classmethod</span><br>{% endif %}
                             {% if method.is_async %}<span class="keyword">async </span>{% endif %}
@@ -530,8 +663,17 @@ class HTMLGenerator:
         <section class="functions-section">
             <h2>Functions</h2>
             {% for func in functions %}
-            <div class="function" id="function-{{ func.name }}">
+            <div class="function{% if editable and func.id not in included_ids and selections %} excluded{% endif %}" id="function-{{ func.name }}">
                 <h3 class="function-signature">
+                    {% if editable %}
+                    <label class="component-checkbox-label">
+                        <input type="checkbox" class="component-checkbox"
+                               data-id="{{ func.id }}"
+                               data-type="function"
+                               data-title="{{ func.name }}"
+                               {% if func.id in included_ids or not selections %}checked{% endif %}>
+                    </label>
+                    {% endif %}
                     {% if func.is_async %}<span class="keyword">async </span>{% endif %}
                     <span class="keyword">def</span>
                     <span class="function-name">{{ func.name }}</span>(<span class="params">
@@ -906,6 +1048,176 @@ body {
     margin-top: 5px;
 }
 
+/* ==================== EDITABLE MODE STYLES ==================== */
+
+/* Edit Controls Panel */
+.edit-controls {
+    background: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.edit-controls h3 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.edit-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.edit-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.edit-btn:hover {
+    background: var(--sidebar-bg);
+    border-color: var(--link-color);
+}
+
+.edit-btn.primary {
+    background: var(--link-color);
+    color: white;
+    border-color: var(--link-color);
+}
+
+.edit-btn.primary:hover {
+    background: var(--link-hover);
+    border-color: var(--link-hover);
+}
+
+.edit-hint {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 10px;
+    line-height: 1.4;
+}
+
+/* Edit Mode Badge */
+.edit-mode-badge {
+    display: inline-block;
+    background: #ff9800;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+/* Checkbox Labels */
+.toc-checkbox-label,
+.component-checkbox-label,
+.header-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.toc-checkbox-label a,
+.header-checkbox-label {
+    flex: 1;
+}
+
+.component-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--link-color);
+}
+
+.component-checkbox-label {
+    display: inline-flex;
+    margin-right: 10px;
+}
+
+/* Excluded Items Styling */
+.excluded {
+    opacity: 0.5;
+}
+
+.excluded a {
+    text-decoration: line-through;
+    color: #999 !important;
+}
+
+.toc-item.excluded > .toc-checkbox-label > a,
+.toc-item.excluded > a {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.method.excluded,
+.function.excluded,
+.class-section.excluded {
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(128, 128, 128, 0.05) 10px,
+        rgba(128, 128, 128, 0.05) 20px
+    );
+    border-left: 3px solid #ccc;
+    padding-left: 15px;
+    margin-left: -18px;
+}
+
+/* Header checkbox in module pages */
+.header-checkbox-label input {
+    margin-right: 10px;
+}
+
+/* Editable mode specific overrides */
+.editable-mode .class-title,
+.editable-mode .method-signature,
+.editable-mode .function-signature {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.editable-mode .component-checkbox-label {
+    flex-shrink: 0;
+}
+
+/* Dark mode adjustments for edit mode */
+@media (prefers-color-scheme: dark) {
+    .edit-mode-badge {
+        background: #f57c00;
+    }
+
+    .excluded a {
+        color: #666 !important;
+    }
+
+    .method.excluded,
+    .function.excluded,
+    .class-section.excluded {
+        background: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 10px,
+            rgba(128, 128, 128, 0.1) 10px,
+            rgba(128, 128, 128, 0.1) 20px
+        );
+    }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     body {
@@ -922,12 +1234,16 @@ body {
     .content {
         padding: 20px;
     }
+
+    .edit-buttons {
+        flex-direction: column;
+    }
 }
 '''
 
     def _get_default_js(self) -> str:
         """Get default JavaScript for search functionality."""
-        return '''// DocuAgent Search Functionality
+        return '''// DocuAgent Search and Edit Functionality
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('search-input');
     const searchResults = document.getElementById('search-results');
@@ -976,6 +1292,169 @@ document.addEventListener('DOMContentLoaded', function() {
                 searchResults.style.display = 'block';
             }
         });
+    }
+
+    // ==================== EDITABLE MODE FUNCTIONALITY ====================
+
+    // Check if we're in editable mode
+    const isEditableMode = document.body.classList.contains('editable-mode');
+
+    if (isEditableMode) {
+        // Storage key for selections (use localStorage to persist across pages)
+        const STORAGE_KEY = 'docuagent_selections';
+
+        // Load existing selections from localStorage
+        function loadSelections() {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+                return stored ? JSON.parse(stored) : {};
+            } catch (e) {
+                console.error('Error loading selections:', e);
+                return {};
+            }
+        }
+
+        // Save selections to localStorage
+        function saveSelections(selections) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
+            } catch (e) {
+                console.error('Error saving selections:', e);
+            }
+        }
+
+        // Get all selections from the current page
+        function getSelectionsFromPage() {
+            const selections = loadSelections();
+            document.querySelectorAll('.component-checkbox').forEach(checkbox => {
+                const id = checkbox.dataset.id;
+                if (id) {
+                    selections[id] = {
+                        included: checkbox.checked,
+                        type: checkbox.dataset.type,
+                        title: checkbox.dataset.title
+                    };
+                }
+            });
+            return selections;
+        }
+
+        // Sync checkboxes with stored selections
+        function syncCheckboxesWithStorage() {
+            const selections = loadSelections();
+            document.querySelectorAll('.component-checkbox').forEach(checkbox => {
+                const id = checkbox.dataset.id;
+                if (id && selections[id] !== undefined) {
+                    checkbox.checked = selections[id].included;
+                    updateVisualState(checkbox);
+                }
+            });
+        }
+
+        // Update visual state of component based on checkbox
+        function updateVisualState(checkbox) {
+            const parent = checkbox.closest('.toc-item, .method, .function, .class-section');
+            if (parent) {
+                if (checkbox.checked) {
+                    parent.classList.remove('excluded');
+                } else {
+                    parent.classList.add('excluded');
+                }
+            }
+        }
+
+        // Handle checkbox changes
+        document.querySelectorAll('.component-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const selections = getSelectionsFromPage();
+                saveSelections(selections);
+                updateVisualState(this);
+
+                // Sync same component across sidebar and content
+                const id = this.dataset.id;
+                document.querySelectorAll(`.component-checkbox[data-id="${id}"]`).forEach(cb => {
+                    if (cb !== this) {
+                        cb.checked = this.checked;
+                        updateVisualState(cb);
+                    }
+                });
+            });
+        });
+
+        // Sync on page load
+        syncCheckboxesWithStorage();
+
+        // Select All button
+        const selectAllBtn = document.getElementById('select-all-btn');
+        if (selectAllBtn) {
+            selectAllBtn.addEventListener('click', function() {
+                document.querySelectorAll('.component-checkbox').forEach(checkbox => {
+                    checkbox.checked = true;
+                    updateVisualState(checkbox);
+                });
+                const selections = getSelectionsFromPage();
+                saveSelections(selections);
+            });
+        }
+
+        // Deselect All button
+        const deselectAllBtn = document.getElementById('deselect-all-btn');
+        if (deselectAllBtn) {
+            deselectAllBtn.addEventListener('click', function() {
+                document.querySelectorAll('.component-checkbox').forEach(checkbox => {
+                    checkbox.checked = false;
+                    updateVisualState(checkbox);
+                });
+                const selections = getSelectionsFromPage();
+                saveSelections(selections);
+            });
+        }
+
+        // Export Selections button
+        const exportBtn = document.getElementById('export-selections-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function() {
+                const selections = loadSelections();
+
+                // Convert to YAML format compatible with DocuAgent
+                const yamlContent = generateYAML(selections);
+
+                // Create and download file
+                const blob = new Blob([yamlContent], { type: 'text/yaml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'selections.yaml';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                // Show confirmation
+                alert('Selections exported!\\n\\nTo use these selections:\\n1. Move selections.yaml to your project\\'s .docuagent/ folder\\n2. Run: docuagent generate --use-selections');
+            });
+        }
+
+        // Generate YAML content from selections
+        function generateYAML(selections) {
+            const now = new Date().toISOString();
+            let yaml = `# DocuAgent Selections\\n`;
+            yaml += `# Generated from editable documentation mode\\n`;
+            yaml += `# To use: place in .docuagent/selections.yaml and run: docuagent generate --use-selections\\n\\n`;
+            yaml += `version: "1.0"\\n`;
+            yaml += `updated_at: "${now}"\\n`;
+            yaml += `metadata: {}\\n`;
+            yaml += `selections:\\n`;
+
+            for (const [id, data] of Object.entries(selections)) {
+                yaml += `  ${id}:\\n`;
+                yaml += `    included: ${data.included}\\n`;
+                yaml += `    custom_title: null\\n`;
+                yaml += `    custom_description: null\\n`;
+            }
+
+            return yaml;
+        }
     }
 });
 '''
