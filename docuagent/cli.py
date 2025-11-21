@@ -62,6 +62,11 @@ def main():
     is_flag=True,
     help="Use existing selections from .docuagent/selections.yaml",
 )
+@click.option(
+    "--editable",
+    is_flag=True,
+    help="Generate documentation in editable mode with checkboxes to select components",
+)
 def generate(
     repo_path: str,
     output: str,
@@ -70,6 +75,7 @@ def generate(
     include_source: bool,
     no_ai: bool,
     use_selections: bool,
+    editable: bool,
 ):
     """Generate documentation for a repository.
 
@@ -175,6 +181,7 @@ def generate(
             output_dir=output,
             title=title,
             include_source=include_source,
+            editable=editable,
         )
 
         output_path = html_generator.generate(
